@@ -1,0 +1,3 @@
+% OpenCV fisheye model, 1 radial distortion coefficient
+% f, cx, cy, k
+551.485 651.082 333.437 -0.0552523
