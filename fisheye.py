@@ -1,9 +1,7 @@
 import matplotlib.pyplot as plt
-import matplotlib.image as mpimg
 import numpy as np
-from undistort_fisheye import undistort_image
-import scipy.optimize as op
-import pickle
+import os
+
 import cv2
 
 def camera_to_fisheye(X, Y, Z, intrinsics):
@@ -82,6 +80,7 @@ def test_point_fisheye_distortion():
     """
         run a test to visualize point fisheye distortion
     """
+    intrinsics = np.loadtxt('data/intrinsics.txt', comments='%')
     X = np.linspace(-2,+2,10)
     Y = np.linspace(-1,+1,5)
     uv_fish = []
@@ -124,4 +123,18 @@ def test_image_fisheye_distortion():
     imgplot2 = plt.imshow(img_rect)
     plt.show()
 
-test_image_fisheye_distortion()
+def convert_fished_folder(input_directory_path, output_directory_path):
+    """
+    defishes all images in a folder and saves them to an output directory
+    """
+    K, D = load_camera_parameters()
+    for file in os.listdir(input_directory_path):
+        if file.endswith(".jpg"):
+            print(file)
+            img_src = cv2.imread(input_directory_path + "/" + file)
+            img_rect = undistort_fisheye_image(img_src, K, D)
+            cv2.imwrite(output_directory_path + "/" + file, img_rect)
+
+
+convert_fished_folder('/home/sebastian/Studium/Robotic_Vision_TTK_4255/project/grid-detection/data/seq3', '/home/sebastian/Studium/Robotic_Vision_TTK_4255/project/grid-detection/data/defished_seq3')
+# test_image_fisheye_distortion()
