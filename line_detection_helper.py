@@ -17,20 +17,16 @@ def extract_peaks(arr, window_size, threshold):
     peak_rows,peak_cols = np.nonzero(maxima)
     return peak_rows,peak_cols
 
-def draw_line(theta, rho, **args):
+def compute_endpoints(rho, theta, x_min, x_max, y_min, y_max):
     """
-    Draws a line given in normal form (rho, theta).
-    Uses the current plot's xlim and ylim as bounds.
+        Computes the beginning and starting point for a line in normal form 
     """
-
     def clamp(a, b, a_min, a_max, rho, A, B):
         if a < a_min or a > a_max:
             a = np.fmax(a_min, np.fmin(a_max, a))
             b = (rho-a*A)/B
         return a, b
 
-    x_min,x_max = np.sort(plt.xlim())
-    y_min,y_max = np.sort(plt.ylim())
     c = np.cos(theta)
     s = np.sin(theta)
     if np.fabs(s) > np.fabs(c):
@@ -47,6 +43,17 @@ def draw_line(theta, rho, **args):
         x2 = (rho-y2*s)/c
         x1,y1 = clamp(x1, y1, x_min, x_max, rho, c, s)
         x2,y2 = clamp(x2, y2, x_min, x_max, rho, c, s)
+
+    return x1, x2, y1, y2
+
+def draw_line(rho, theta, **args):
+    """
+    Draws a line given in normal form (rho, theta).
+    Uses the current plot's xlim and ylim as bounds.
+    """
+    x_min,x_max = np.sort(plt.xlim())
+    y_min,y_max = np.sort(plt.ylim())
+    x1, x2, y1, y2 = compute_endpoints(rho, theta, x_min, x_max, y_min, y_max)
     plt.plot([x1, x2], [y1, y2], **args)
 
 def central_difference(I):
@@ -127,4 +134,6 @@ def rgb2gray(I):
     Converts a red-green-blue (RGB) image to grayscale brightness.
     """
     return 0.2989*I[:,:,0] + 0.5870*I[:,:,1] + 0.1140*I[:,:,2]
+
+
 

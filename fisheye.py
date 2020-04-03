@@ -136,5 +136,6 @@ def convert_fished_folder(input_directory_path, output_directory_path):
             cv2.imwrite(output_directory_path + "/" + file, img_rect)
 
 
-convert_fished_folder('/home/sebastian/Studium/Robotic_Vision_TTK_4255/project/grid-detection/data/seq3', '/home/sebastian/Studium/Robotic_Vision_TTK_4255/project/grid-detection/data/defished_seq3')
+if __name__ == "__main__":
+    convert_fished_folder('/home/sebastian/Studium/Robotic_Vision_TTK_4255/project/grid-detection/data/seq3', '/home/sebastian/Studium/Robotic_Vision_TTK_4255/project/grid-detection/data/defished_seq3')
 # test_image_fisheye_distortion()
