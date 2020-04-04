@@ -1,6 +1,9 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
+LOSS_INV = 99999
+MAX_GRID_ANGLE_DIFF = 8
+
 def estimate_H(xy, XY):
     A = []
     n = XY.shape[0]
@@ -47,7 +50,19 @@ def choose_solution(T1, T2):
         return T1
     else:
         return T2
-    
+
+def compute_angle(x, y):
+    """
+    x: numpy vector
+    y: numpy vector
+    returns the angle between the two vectors
+    cos(phi) = (| x @ y.T|) / (|x| * |y|) 
+
+
+    """
+    phi = np.arccos(np.dot(x,y) / (np.linalg.norm(x) * np.linalg.norm(y)))
+    return phi * 180 / np.pi
+
 def compute_grid_object_frame():
     grid_object_frame = np.zeros((7,7,2,2))
     for i in range(7):
@@ -57,6 +72,28 @@ def compute_grid_object_frame():
 
 def compute_grid_image_frame(uv, K, grid_object_frame):
     xy = (uv - K[0:2,2])/np.array([K[0,0], K[1,1]])
+    x_dir1 = xy[1,:] - xy[0,:]
+    x_dir2 = xy[3,:] - xy[2,:]
+    y_dir1 = xy[2,:] - xy[0,:]
+    y_dir2 = xy[3,:] - xy[1,:]
+    # print("compute_angle(x_dir1, x_dir2) " + str(compute_angle(x_dir1, x_dir2)))
+    # print("compute_angle(y_dir1, y_dir2) " + str(compute_angle(y_dir1, y_dir2)))
+    # print("compute_angle(x_dir1, y_dir1) " + str(compute_angle(x_dir1, y_dir1)))
+    # print("compute_angle(x_dir2, y_dir2) " + str(compute_angle(x_dir2, y_dir2)))
+    if compute_angle(x_dir1, x_dir2) > 2 * MAX_GRID_ANGLE_DIFF and compute_angle(y_dir1, y_dir2) > 2 * MAX_GRID_ANGLE_DIFF:
+        return False, 0, 0, 0, 0
+
+    # print(compute_angle(x_dir1, y_dir1))
+    # print()
+    if np.abs(compute_angle(x_dir1, y_dir1) - 90) > MAX_GRID_ANGLE_DIFF and np.abs(compute_angle(x_dir1, y_dir1) - 180) > MAX_GRID_ANGLE_DIFF:
+        return False, 0, 0, 0, 0
+
+    if np.abs(compute_angle(x_dir2, y_dir2) - 90) > MAX_GRID_ANGLE_DIFF and np.abs(compute_angle(x_dir2, y_dir2) - 180) > MAX_GRID_ANGLE_DIFF:
+        return False, 0, 0, 0, 0
+    # print(compute_angle(x_dir1, y_dir1))
+    # print(compute_angle(x_dir2, y_dir2))
+    # print()
+
     x_dir = ((xy[1,:] - xy[0,:]) + (xy[3,:] - xy[2,:])) / 2
     y_dir = ((xy[2,:] - xy[0,:]) + (xy[3,:] - xy[1,:])) / 2
 
@@ -67,19 +104,13 @@ def compute_grid_image_frame(uv, K, grid_object_frame):
 
     # compute the coordinates of the grid intersection lines in image frame (pixel coordinates)
     grid_image_frame = grid_camera_frame * np.array([K[0,0], K[1,1]]) + uv[0,:]
-    return grid_image_frame, x_dir, y_dir, xy
+    return True, grid_image_frame, x_dir, y_dir, xy
   
-def compute_loss(grid_image_frame, intersections, x_dir , y_dir):
+def compute_loss(grid_image_frame, intersections, x_dir, y_dir):
     loss = 0
-    LOSS_INV = 99999
-    max_diff_to_orthogonal_angle = 88
-    max_angle_fac = np.cos(max_diff_to_orthogonal_angle * np.pi / 180)
-    if np.abs(np.dot(x_dir, y_dir)) > max_angle_fac * np.prod(np.linalg.norm((x_dir, y_dir), axis = 1)):
-        return LOSS_INV
+    # if np.abs(compute_angle(x_dir, y_dir) - 90) > MAX_GRID_ANGLE_DIFF:
+    #     return LOSS_INV
     for intersection in intersections:
-        # print("intersection " + str(intersection))
-        # print("min dist " + str(np.min(np.linalg.norm(intersection - grid_image_frame, axis = 2))))
-        # print()
         min_dist = np.min(np.linalg.norm(intersection - grid_image_frame, axis = 2))
         loss = loss + min_dist
     return loss
@@ -92,59 +123,50 @@ def ransac(intersections, K):
         if np.unique(rand_ind).size < 4:
             continue
         uv = np.array(intersections[rand_ind, :])
-        grid_image_frame, x_dir, y_dir, _ = compute_grid_image_frame(uv, K, grid_object_frame)
+        valid, grid_image_frame, x_dir, y_dir, _ = compute_grid_image_frame(uv, K, grid_object_frame)
+        if not valid:
+            continue
         loss = compute_loss(grid_image_frame, intersections, x_dir, y_dir)
         result.append((loss, rand_ind))
     result = np.array(result)
+    # print(result)
     min_los_ind = np.argmin(result[:,0])
     return result[min_los_ind, 1:5]
 
 
 def estimate_camera_position(intersections, K):
     XY = np.array([(0,0),(1,0),(0,1),(1,1)])
+    grid_object_frame = compute_grid_object_frame()
+    # intersections = intersections[[8,:], [1,:], [6,:], [0,:]]
+    # uv = intersections[np.array((8,1,6,0))]
+    # print(uv)
+    # valid, grid_image_frame, x_dir, y_dir, _ = compute_grid_image_frame(uv, K, grid_object_frame)
+    # print(grid_image_frame)
+    # draw_grid(grid_image_frame)
+    # return
     min_los_ind = ransac(intersections, K)
     uv = np.array(intersections[min_los_ind[0], :])
     grid_object_frame = compute_grid_object_frame()
-    grid_image_frame, _, _, xy = compute_grid_image_frame(uv, K, grid_object_frame)
-
-    # print(intersections)
-    # print(XY)
-    # Convert pixel coordinates to normalized image coordinates
-    # print("uv[0,:] " + str(uv[0,:]))
-    # print("uv[1,:] " + str(uv[1,:]))
-    # print("uv[2,:] " + str(uv[2,:]))
-    # print("uv[3,:] " + str(uv[3,:]))
-    # print(loss)
-    # print(uv)
-    # print(xy)
-    H = estimate_H(xy, XY)
-    T1,T2 = decompose_H(H)
-    T = choose_solution(T1, T2)
-    draw_grid(grid_image_frame)
-    # print(K.shape)
-    # print(H.shape)
-    # print(H)
-    # print(T)
-    # print(XY.shape)
-    # print(xy.shape)
+    valid, grid_image_frame, _, _, xy = compute_grid_image_frame(uv, K, grid_object_frame)
+    if valid:
+        H = estimate_H(xy, XY)
+        T1,T2 = decompose_H(H)
+        T = choose_solution(T1, T2)
+        position = ((T[0][3], T[1][3]))
+            
+        print("trajectory[0] " + str(position[0]))
+        print("trajectory[1] " + str(position[1]))
+        print("trajectory[2] " + str(T[2][3]))
+        draw_grid(grid_image_frame)
+        return True, position
+    return False, 0
 
 def draw_grid(grid_image_frame):
-   # image_coords = (grid_coords) * np.array([K[0,0], K[1,1]]) + K[0:2,2]
-    # print("[0][0] " + str(image_coords[0][0]))
-    # print("[6][0] " + str(image_coords[6][0]))
-    # print("[0][6] " + str(image_coords[0][6]))#
 
     for i in range(7):
         u_top, v_top = grid_image_frame[0][i] 
         u_bot, v_bot = grid_image_frame[6][i]
-        # print("(u_top, v_top) " + str(image_coords[0][i])) 
-        # print("(u_bot, v_bot)" + str(image_coords[6][i]))
         plt.plot([u_bot, u_top], [v_bot, v_top], color = 'red')
-    # plt.plot(image_coords[6][0], image_coords[0][0], color = 'red')
-    # plt.plot(image_coords[6][1], image_coords[0][1], color = 'red')
-    # plt.plot(image_coords[6][2], image_coords[0][2], color = 'red')
-    # plt.plot(image_coords[6][3], image_coords[0][3], color = 'red')
-    # plt.plot(image_coords[6][4], image_coords[0][4], color = 'red')
 
     for i in range(7):
         u_left, v_left = grid_image_frame[i][0] 
@@ -152,3 +174,8 @@ def draw_grid(grid_image_frame):
         plt.plot([u_left, u_right], [v_left, v_right], color = 'red')
 
 
+def plot_trajectory(trajectory):
+    plt.figure(figsize=[6,8])
+    plt.scatter(trajectory[0], trajectory[1])
+    plt.xlim([-1, 1])
+    plt.ylim([-1, 1])
