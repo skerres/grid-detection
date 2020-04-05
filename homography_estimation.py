@@ -3,6 +3,7 @@ import numpy as np
 
 LOSS_INV = 99999
 MAX_GRID_ANGLE_DIFF = 8
+POS_INV = (-100, -100, -100)
 
 def estimate_H(xy, XY):
     A = []
@@ -64,14 +65,18 @@ def compute_angle(x, y):
     return phi * 180 / np.pi
 
   
-def compute_loss(grid_image_frame, intersections, x_dir, y_dir):
-    loss = 0
+def compute_loss(grid_image_frame, intersections, x_dir, y_dir, T, prev_pos):
+    grid_loss = 0
+    position_loss = 0
+    POSITION_LOSS_FACTOR = 10
     # if np.abs(compute_angle(x_dir, y_dir) - 90) > MAX_GRID_ANGLE_DIFF:
     #     return LOSS_INV
     for intersection in intersections:
         min_dist = np.min(np.linalg.norm(intersection - grid_image_frame, axis = 2))
-        loss = loss + min_dist
-    return loss
+        grid_loss = grid_loss + min_dist
+    if not prev_pos == POS_INV:
+        position_loss = POSITION_LOSS_FACTOR * np.linalg.norm(np.linalg.norm(T[0:3, 3] - np.array(prev_pos)))
+    return grid_loss + position_loss, grid_loss, position_loss
 
 def draw_grid(grid_image_frame):
 
@@ -91,6 +96,12 @@ def plot_trajectory(trajectory):
     plt.scatter(trajectory[0], trajectory[1])
     plt.xlim([-1, 1])
     plt.ylim([-1, 1])
+
+def compute_camera_transformation(xy, XY):
+    H = estimate_H(xy, XY)
+    T1,T2 = decompose_H(H)
+    T = choose_solution(T1, T2)
+    return T
 
 def compute_grid_image_frame(uv, K, grid_object_frame):
     xy = (uv - K[0:2,2])/np.array([K[0,0], K[1,1]])
@@ -127,37 +138,60 @@ def compute_grid_image_frame(uv, K, grid_object_frame):
     grid_image_frame = grid_camera_frame * np.array([K[0,0], K[1,1]]) + uv[0,:]
     return True, grid_image_frame, x_dir, y_dir, xy
 
-def ransac(intersections, K):
+def ransac(intersections, K, XY, prev_pos):
     i = 0
-    grid_object_frame = compute_grid_object_frame()
+    grid_object_frame, grid_object_frame_1x2 = compute_grid_object_frame()
     result = []
     for _ in range(10000):
         rand_ind = (np.random.rand(4) * intersections.shape[0]).astype(int)
         if np.unique(rand_ind).size < 4:
             continue
         uv = np.array(intersections[rand_ind, :])
-        valid, grid_image_frame, x_dir, y_dir, _ = compute_grid_image_frame(uv, K, grid_object_frame)
+        valid, grid_image_frame, x_dir, y_dir, xy = compute_grid_image_frame(uv, K, grid_object_frame)
         if not valid:
             continue
         i = i +1
-        loss = compute_loss(grid_image_frame, intersections, x_dir, y_dir)
-        result.append((loss, rand_ind))
+        T = compute_camera_transformation(xy, XY)
+        loss, grid_loss, pos_loss = compute_loss(grid_image_frame, intersections, x_dir, y_dir, T, prev_pos)
+        result.append((loss, rand_ind, grid_loss, pos_loss))
     result = np.array(result)
-    print(i)
     # print(result)
+    if result.size == 0:
+        return False, 0
     min_los_ind = np.argmin(result[:,0])
-    return result[min_los_ind, 1:5]
+    # print(result)
+    # print("Final Loss: "+ str(result[min_los_ind, 0]) + " " + str(result[min_los_ind, 2:4]))
+    # print("Result " + str(result[min_los_ind, 1]))
+    return True, result[min_los_ind, 1]
 
 def compute_grid_object_frame():
-    grid_object_frame = np.zeros((7,7,2,2))
+    grid_object_frame_2x2 = np.zeros((7,7,2,2))
+    grid_object_frame_1x2 = np.zeros((7,7,2))
     for i in range(7):
         for j in range(7):
-            grid_object_frame[j][i] = ((i - 3, i - 3), (j - 3, j - 3))
-    return grid_object_frame
+            grid_object_frame_2x2[j][i] = ((i - 3, i - 3), (j - 3, j - 3))
+            grid_object_frame_1x2[j][i] = (i - 3, j - 3)
+    return grid_object_frame_2x2, grid_object_frame_1x2
 
-def estimate_camera_position(intersections, K):
+def object_frame_to_pixel_coordinate(XY, R, t, K):
+    XYZ = np.concatenate((XY, np.zeros((XY.shape[0], 1))), axis = 1)
+    # print("XYZ " + str(XYZ))
+    # print("XYZ.shape " + str(XYZ.shape))
+    XYZ_camera = np.dot(R, XYZ.T).T + t.T
+    # print("XYZ_camera " + str(XYZ_camera))
+    # print("XYZ_camera.shape " + str(XYZ_camera.shape))
+    x = np.reshape(XYZ_camera[:, 0] / XYZ_camera[:, 2], (XY.shape[0], 1))
+    y = np.reshape(XYZ_camera[:, 1] / XYZ_camera[:, 2], (XY.shape[0], 1))
+    # print("x " + str(x))
+    # print("y " + str(y))
+    xy = np.concatenate((x, y), axis = 1)
+    uv = xy * np.array([K[0,0], K[1,1]]) +  K[0:2,2]
+    # print("uv: " + str(uv))
+    return uv
+
+def estimate_camera_position(intersections, K, prev_pos):
     XY = np.array([(0,0),(1,0),(0,1),(1,1)])
-    grid_object_frame = compute_grid_object_frame()
+    grid_object_frame, grid_object_frame_1x2 = compute_grid_object_frame()
     # intersections = intersections[[8,:], [1,:], [6,:], [0,:]]
     # uv = intersections[np.array((8,1,6,0))]
     # print(uv)
@@ -165,23 +199,28 @@ def estimate_camera_position(intersections, K):
     # print(grid_image_frame)
     # draw_grid(grid_image_frame)
     # return
-    min_los_ind = ransac(intersections, K)
-    uv = np.array(intersections[min_los_ind[0], :])
-    grid_object_frame = compute_grid_object_frame()
+    valid, min_los_ind = ransac(intersections, K, XY, prev_pos)
+    if not valid: 
+        return False, POS_INV
+    uv = np.array(intersections[min_los_ind, :])
+    grid_object_frame, grid_object_frame_1x2 = compute_grid_object_frame()
     # valid, grid_image_frame, _, _, xy, T = compute_grid_image_frame(uv, K, grid_object_frame, prev_position)
     valid, grid_image_frame, _, _, xy = compute_grid_image_frame(uv, K, grid_object_frame)
     if valid:
-        H = estimate_H(xy, XY)
-        T1,T2 = decompose_H(H)
-        T = choose_solution(T1, T2)
-        position = ((T[0][3], T[1][3]))
-            
-        print("trajectory[0] " + str(position[0]))
-        print("trajectory[1] " + str(position[1]))
-        print("trajectory[2] " + str(T[2][3]))
-        print("yaw / psi: " + str(-np.arctan2(T[0][2], T[1][2])))
-        print("pitch / theta: " + str(np.arccos(T[2][2])))
-        print("roll / phi: " + str(-np.arctan2(T[0][2], T[1][2])))
-        draw_grid(grid_image_frame)
+        T = compute_camera_transformation(xy, XY)
+        # print(grid_object_frame_1x2)
+        # print(np.reshape(grid_object_frame_1x2, (-1, 2)))
+        uv2 = object_frame_to_pixel_coordinate(np.reshape(grid_object_frame_1x2, (-1, 2)), T[0:3,0:3], np.reshape(T[0:3,3], (3, 1)), K)
+        uv2 = np.reshape(uv2, (7,7,2))
+        position = ((T[0][3], T[1][3], T[2][3]))
+        # print(uv)
+       
+        # print("trajectory[0] " + str(position[0]))
+        # print("trajectory[1] " + str(position[1]))
+        # print("trajectory[2] " + str(T[2][3]))
+        # print("yaw / psi: " + str(-np.arctan2(T[0][2], T[1][2])))
+        # print("pitch / theta: " + str(np.arccos(T[2][2])))
+        # print("roll / phi: " + str(-np.arctan2(T[2][0], T[2][1])))
+        draw_grid(uv2)
         return True, position
-    return False, 0
+    return False, POS_INV
