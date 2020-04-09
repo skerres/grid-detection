@@ -2,6 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from line_detection_helper import *
 
+import cv2
+
 
 def compute_line_normalform(I_rgb):
     """
@@ -11,7 +13,7 @@ def compute_line_normalform(I_rgb):
     blur_sigma     = 1
     line_threshold = 20
     bins           = 500
-    window_size = 11
+    window_size = 13
 
     rho_max   = +np.linalg.norm(I_rgb.shape)
     rho_min   = -rho_max
@@ -125,3 +127,48 @@ def shift_rho_theta(rho, theta):
     # theta_pos = theta[(np.where(theta > 0)]
     # rho = rho[np.where(theta < 0)] * -1
     # theta = theta[np.where(theta < 0)] + np.pi
+
+    
+def load_camera_parameters():
+    """
+    load camera parameters f, cx, cy and distortion coefficient k
+            and return camera matrix K and distortion matrix D
+    """
+
+    intrinsics = np.loadtxt('data/intrinsics.txt', comments='%')
+
+    f,cx,cy,k = intrinsics
+    K = np.zeros((3,3))
+    K[0, 0] = f 
+    K[1, 1] = f 
+    K[0, 2] = cx 
+    K[1, 2] = cy 
+    K[2, 2] = 1
+    D = np.zeros(4)
+    D[0] = k
+
+    return K, D
+
+
+def test(input_dir, filename):
+    filepath = input_dir + filename
+    # Read image
+    img = cv2.imread(filepath, cv2.IMREAD_COLOR) # road.png is the filename
+    # Convert the image to gray-scale
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    # Find the edges in the image using canny detector
+    edges = cv2.Canny(gray, 50, 200)
+    # Detect points that form a line
+    lines = cv2.HoughLinesP(edges, rho = 1, theta = np.pi/180 * 0.1, threshold = 150, minLineLength=30, maxLineGap=250)
+    # Draw lines on the image   
+    for line in lines:
+        x1, y1, x2, y2 = line[0]
+        cv2.line(img, (x1, y1), (x2, y2), (255, 0, 0), 3)
+    # Show result
+    cv2.imshow("Result Image", img)
+    cv2.imwrite(filename[0:7] + '_opencv.jpg', img) 
+
+if __name__ == "__main__":
+    input_dir = 'data/defished_seq3/'
+    filename = 'img0002.jpg'
+    test(input_dir, filename)
