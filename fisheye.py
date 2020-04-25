@@ -33,6 +33,11 @@ def camera_to_rectilinear(X, Y, Z, intrinsics):
     return [u,v]
 
 def rectilinear_to_fisheye(u_rect, v_rect, K, D):
+    """
+    converts rectiliinear camera coordinates into fisheye camera coordinates
+    u_rect, v_rect:     rectilinear 2d camera coordinates
+    K, D:               camera intrinsics matrix and distortion parameters
+    """
     f = K[0,0]
     cx = K[0,2]
     cy = K[1,2]
@@ -71,9 +76,21 @@ def undistort_fisheye_image(img_src, K, D):
 
 
 def draw_fisheye_grid(grid_image_frame, grid_color = 'yellow'):
+    """
+        draw a grid on the currently active plot using the values on the corners of the grid_image_frame
+        grid_image_frame: numpy array (7x7x2), 2d grid coordinates in the image frame for a canonical 7x7 grid
+    """
     def draw_interpolated_line(u_rect_start, v_rect_start, u_rect_finish, v_rect_finish, K, D, points = 4):
+        """
+            draws a line on a fisheye image by projecting a rectilinear line onto a fisheye image using interpolation
+            u_rect_start, v_rect_start: start point in 2d image coordinates
+            u_rect_finish, v_rect_finish: finish point 2d image coordinates
+            K: camera intriniscs
+            D: distortion parameters
+            points: amount of interpolation points
+        """
             interpolation = np.zeros((points,2))
-            factor = points / (points - 1)
+            factor = points / (points - 1) #factor to smoothly connect all points
             for i in range(interpolation.shape[0]):
                 interpolation[i, 0] = (u_rect_start * (points - i * factor) + u_rect_finish * i * factor) / points
                 interpolation[i, 1] = (v_rect_start * (points - i * factor) + v_rect_finish * i * factor) / points
@@ -82,16 +99,9 @@ def draw_fisheye_grid(grid_image_frame, grid_color = 'yellow'):
                 u_dst, v_dst = rectilinear_to_fisheye(interpolation[i, 0], interpolation[i, 1], K, D)
                 interpolation[i, 0] = u_dst
                 interpolation[i, 1] = v_dst
-            print(interpolation)
-            print()     
             plt.plot(interpolation[:, 0], interpolation[:, 1], color = grid_color)
 
 
-    """
-        grid_image_frame: numpy array (7x7x2)
-
-        draw a grid on the currently active plot using the values on the corners of the grid_image_frame
-    """
     K, D = load_camera_parameters()
 
     for i in range(7):
@@ -105,9 +115,6 @@ def draw_fisheye_grid(grid_image_frame, grid_color = 'yellow'):
             u_rect_left, v_rect_left = grid_image_frame[i][j] 
             u_rect_right, v_rect_right = grid_image_frame[i][j+1]
             draw_interpolated_line(u_rect_left, v_rect_left, u_rect_right, v_rect_right, K, D)
-            # u_dst_left, v_dst_left = rectilinear_to_fisheye(u_rect_left, v_rect_left, K, D)
-            # u_dst_right, v_dst_right = rectilinear_to_fisheye(u_rect_right, v_rect_right, K, D)
-            # plt.plot([u_dst_right, u_dst_left], [v_dst_right, v_dst_left], color = grid_color)
 
 
 def load_camera_parameters():
@@ -191,6 +198,11 @@ def convert_fished_folder(input_directory_path, output_directory_path):
 
 
 def draw_fisheye_grid_image(filepath, grid_image_frame):
+    """
+        draws a grid on a fisheye image and plots the image
+        filepath: path to fisheye image
+        grid_image_frame: numpy array (7x7x2), 2d grid coordinates in the image frame for a canonical 7x7 grid
+    """
 
     img = plt.imread(filepath)
     plt.imshow(img)
@@ -203,6 +215,7 @@ def draw_fisheye_grid_image(filepath, grid_image_frame):
     draw_fisheye_grid(grid_image_frame, grid_color='yellow')
     plt.xlim([0, img.shape[1]])
     plt.ylim([img.shape[0], 0])
+    plt.title("Projection of grid onto fisheye image with two interpolation points")
 
 if __name__ == '__main__':
     picklepath = 'data/img0100_grid_image_frame.pickle'

@@ -1,21 +1,12 @@
 import numpy as np
-# from line_detection_helper import compute_endpoints
-# class Point:
-#     """ Point class represents and manipulates x,y coords. """
-
-#     def __init__(self):
-#         """ Create a new point at the origin """
-#         self.x = 0
-#         self.y = 0
-
-#     def dist(self, p):
-#         "compute the distance to other Point"
-#         return np.sqrt(np.power((p.x - self.x), 2) + np.power((p.y - self.y), 2))
 
 RHO_INV = 0
 THETA_INV = -100
 
 def compute_endpoints(rho1, theta1, x_min, x_max, y_min, y_max):
+    """
+        this function computes the points of the lines on the border of the image
+    """
     if(np.abs(theta1) > np.pi * 45/180 and np.abs(theta1) < np.pi * 135/180 or (np.abs(theta1) > np.pi * 225/180 and np.abs(theta1) < np.pi * 315/180)):
         x1 = x_min
         y1 = (rho1 - x1 * np.cos(theta1))/np.sin(theta1)
@@ -33,7 +24,10 @@ def compute_endpoints(rho1, theta1, x_min, x_max, y_min, y_max):
 
 def merge_related_lines(img, rho, theta, threshold = 100):
     """
-    Merge similiar lines. The lines are in normalform.
+    Merge similiar lines. Lines are considered similiar if the begin and endpoint of a line is within a certain threshold
+    img: np.array, image
+    rho, theta: lines in normalform
+    threshold: maximum distance between two endpoints for two lines to be considered equal
     """
     x_min = 0
     y_min = 0

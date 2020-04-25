@@ -2,11 +2,20 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pickle
 
-LOSS_INV = 99999
-MAX_GRID_ANGLE_DIFF = 18
-POS_INV = np.array((-100, -100, -100))
+LOSS_INV = 99999 #Invalid Loss 
+MAX_GRID_ANGLE_DIFF = 18 #Maximum angle difference for grid to be considered valid
+POS_INV = np.array((-100, -100, -100)) #Invalid Estimated Position
 
 class EstimatedPosition(object):
+    """
+        class which contains data fiels for the estimated camera position
+        position:       np.vector((3,)), contains 3d position
+        xy:             np.array((4,2) contains world coordinates of associated canonical tile
+        x_dir:          np.array(2,), x direction of canoncial grid
+        y_dir:          np.array(2,), y direction of canoncial grid
+        euler_angle:    np.array((roll, pitch, yaw)), euler angles for rotation of camera
+
+    """
     
     def __init__(self, position, xy, euler_angle):
         self.position = position
@@ -40,6 +49,10 @@ def estimate_H(xy, XY):
     return H
 
 def decompose_H(H):
+    """
+        decompose homography matrix into rotation matrix and translation matrix
+        H: np.array((4,4)), homograhpy matrix
+    """
     H *= 1.0/np.linalg.norm(H[:,0])
     r1 = H[:,0]
     r2 = H[:,1]
@@ -136,22 +149,28 @@ def draw_grid(grid_image_frame, grid_color = 'red'):
         u_right, v_right = grid_image_frame[i][6] 
         plt.plot([u_left, u_right], [v_left, v_right], [0, 0], color = grid_color)
     
-    plt.plot([u_left, u_right], [v_left, v_right], [0, 0], color = grid_color)
-
-
-def plot_trajectory(trajectory):
-    plt.figure(figsize=[6,8])
-    plt.scatter(trajectory[0], trajectory[1])
-    plt.xlim([-1, 1])
-    plt.ylim([-1, 1])
+    line = plt.plot([u_left, u_right], [v_left, v_right], [0, 0], color = grid_color)
+    
 
 def compute_camera_transformation(xy, XY):
+    """
+        estimate the transformation matrix from grid corners in one image with the associated real world grid
+        xy: np.array((4,2)) coordinates of grid corners in image
+        XY = np.array([(0,0),(1,0),(0,1),(1,1)])  associated grid. 
+        The point described by the first row of the xy array corresponds to (0,0), second to (1,0), third to (0,1) and fourth to (1,1)  
+    """
     H = estimate_H(xy, XY)
     T1,T2 = decompose_H(H)
     T = choose_solution(T1, T2)
     return T
 
 def check_rectilinear_xy(xy):
+    """
+        check if the grid corresponding to the chosen grid corners is approximately rectilinear
+        xy: np.array((4,2)) coordinates of grid corners in image
+
+    """
+
     x_dir1 = xy[1,:] - xy[0,:]
     x_dir2 = xy[3,:] - xy[2,:]
     y_dir1 = xy[2,:] - xy[0,:]
@@ -168,38 +187,58 @@ def check_rectilinear_xy(xy):
     return True
 
 def ransac(intersections, K, XY, prev_pos):
+    """
+        perform a ransac loop to estimate the corner points of a tile which correspond to a 1mx1m canoncial grid 
+        https://en.wikipedia.org/wiki/Random_sample_consensus
+        intersections: np.array(N,)
+    """
     grid_object_frame = compute_grid_object_frame()
     result = []
     for _ in range(20000):
+        # create random indices corresponding to the row index chosen from the intersection 
         rand_ind = (np.random.rand(4) * intersections.shape[0]).astype(int)
         if np.unique(rand_ind).size < 4:
             continue
+        # choose the intersections which correspond to the random indices
         uv = np.array(intersections[rand_ind, :])
+        # convert the image coordinates into real word coordinates
         xy = (uv - K[0:2,2])/np.array([K[0,0], K[1,1]])
 
+        # check if the grid satisfies the condition that it is approximately rectilinear
         valid = check_rectilinear_xy(xy)
         if not valid:
             continue
+        # If the chosen intersections are already part of the result they don't need to be considered
         if len(result) > 2 and any(np.equal(np.stack(np.array(result)[:,1]),rand_ind).all(1)):
             continue
 
+        #compute the camera transformation matrix
         T = compute_camera_transformation(xy, XY)
+        #the z coordinate of the camera must be higher then 1.3m and lower then 2m
         if T[2][3] < 1.3 or T[2][3] > 2:
             continue 
+
+        #compute the grid in the image frame
         grid_image_frame = compute_grid_image_frame(grid_object_frame, T, K)
+        #compute the loss for the grid. The loss is an indicator for the quality of the grid
         loss, grid_loss, pos_loss = compute_loss(grid_image_frame, intersections, T, prev_pos)
 
+        #append the associated grid in the list of results
         result.append((loss, rand_ind, grid_loss, pos_loss))
     result = np.array(result)
+    # no valid results were found, return a flag that the computation was unsucessfull
     if result.size == 0:
         return False, 0
+
+    # return the result with the lowest total los
     min_los_ind = np.argmin(result[:,0])
-    if not np.min(result[:,3]) == result[min_los_ind,3]:
-        print("!" * 20)
-    # print()
+
     return True, result[min_los_ind, 1]
 
 def compute_grid_object_frame():
+    """
+        returns a np.array((7,7,2)) corresponding to the grid in the object frame
+    """
     grid_object_frame = np.zeros((7,7,2))
     for i in range(7):
         for j in range(7):
@@ -207,6 +246,14 @@ def compute_grid_object_frame():
     return grid_object_frame
 
 def compute_grid_image_frame(grid_object_frame, T, K):
+    """
+        computes and returns a np.array((7,7,2)) corresponding to the grid in the image frame
+        grid_object_frame: np.array((7,7,2)) corresponding to the grid in the object frame
+        T: camera transformatinon matrix
+        K: camera intrinsics matrix
+
+    """
+
     grid_object_frame = np.reshape(grid_object_frame, (-1, 2))
     R = T[0:3,0:3]
     t = np.reshape(T[0:3,3], (3, 1))
@@ -221,6 +268,12 @@ def compute_grid_image_frame(grid_object_frame, T, K):
     return grid_image_frame
 
 def estimate_camera_position(intersections, K, prev_pos):
+    """
+        estimates the camera position and the corner points of the detected grid
+        intersections: np.array((N,2)) intersections of lines
+        K: camera intrinsics
+        prev_pos: previous camera position
+    """
     XY = np.array([(0,0),(1,0),(0,1),(1,1)])
     grid_object_frame = compute_grid_object_frame()
 
@@ -231,10 +284,7 @@ def estimate_camera_position(intersections, K, prev_pos):
     xy = (uv - K[0:2,2])/np.array([K[0,0], K[1,1]])
     T = compute_camera_transformation(xy, XY)
     grid_image_frame = compute_grid_image_frame(grid_object_frame, T, K)
-    # picklepath = 'data/img0100_grid_image_frame.pickle'
-    # with open(picklepath, 'wb') as handle:
-    #     pickle.dump(grid_image_frame, handle)
-    #     print("wrote to file")
+
     roll = np.arctan2(T[2][0], T[2][1]) 
     pitch = np.arccos(T[2][2]) 
     yaw = np.arctan2(T[0][2], T[1][2]) 
@@ -242,5 +292,4 @@ def estimate_camera_position(intersections, K, prev_pos):
     position = np.array((T[0][3], T[1][3], T[2][3]))
 
     estimated_position = EstimatedPosition(position, xy, euler_angle)
-    # print("position: " + str(position))
     return True, estimated_position, grid_image_frame

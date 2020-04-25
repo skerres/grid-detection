@@ -1,11 +1,15 @@
 import numpy as np 
-import matplotlib.pyplot as plt
 
-def group_lines(rho, theta):
-    group_count = 10
+def group_lines(rho, theta, group_count = 10):
+    """
+        group lines that in each group the angle between the lines are equally spaced.
+        rho, theta: line in normalform
+        group_count: amount of groups
+
+    """
     interval_size = np.pi / group_count
-    groups = [None] * 10
-    for i, (rho1, theta1) in enumerate(zip(rho,theta)):
+    groups = [None] * group_count
+    for i, (rho1, theta1) in enumerate(zip(rho, theta)):
         # print(theta1)
         if np.abs(theta1 - np.pi * 2) < 0.0001:
             theta_clamped = theta1 - np.pi - 0.0001
@@ -17,13 +21,11 @@ def group_lines(rho, theta):
         else:
             theta_clamped = theta1
         group_ind = (int(theta_clamped/interval_size))
-        # print((theta_clamped/interval_size))
-        # print(group_ind)
         if groups[group_ind] is None:
             groups[group_ind] = np.array((rho1, theta1, i))
         else:
             groups[group_ind] = np.append(groups[group_ind], np.array((rho1, theta1, i)))
-            
+        
     for i in range(len(groups)):
         group = groups[i]
         if group is not None:
@@ -35,9 +37,13 @@ def group_lines(rho, theta):
             groups_only_entries.append(groups[i])
     return groups_only_entries
 
-
 def compute_intersection_points(rho, theta):
-    """Finds the intersections between groups of lines."""
+    """
+    Finds the intersections between different group of lines.
+    Lines are grouped according to their angle. If the slope of the lines are sufficiently different, they are put in different groups.
+    As no lines in different groups can be parallel, they must intersect. 
+    rho, theta: lines in normalform
+    """
 
     lines = group_lines(rho, theta)
     intersections = []
@@ -47,7 +53,7 @@ def compute_intersection_points(rho, theta):
                 for line2 in next_group:
                     x0, y0, index1, index2 = intersection(line1, line2)
                     intersections.append((x0, y0, index1, index2)) 
-                    # intersections.append((x0, y0)) 
+                    # intersections.append((x0, y0))
     intersections = np.array(intersections)
     intersections = np.reshape(intersections, (-1, 4))
     # intersections = np.reshape(intersections, (-1, 2))
@@ -77,42 +83,43 @@ def intersection(line1, line2):
     return x0, y0, index1, index2
 
 def select_intersections(intersections, shape, rho, theta):
+    """
+        select the intersection points which are considered helpful for the computation of the grid.
+        They must several conditions:
+        - They must be within the image
+        - The angle between the lines should be within an interval close to a rectilinear angle (np.pi / 2 or np.pi * 3 / 2),
+        the parameter INTERVAL_DEG defines what is the middle of the interval in relation to a rectilinear angle 
+        TOL_DEG describes how big the tolerance around this interval is, that the angle is still considered valid. 
+    """
+    
     TOL_DEG = 7
+    INTERVAL_DEG = 8.6
     u_min = 0
     u_max = shape[1]
     v_min = 0
     v_max = shape[0]
-    u_bounds = np.logical_and(intersections[:,0] > u_min, intersections[:,0] < u_max)
-    v_bounds = np.logical_and(intersections[:,1] > v_min, intersections[:,1] < v_max)
+    u_bounds = np.logical_and(intersections[:, 0] > u_min, intersections[:, 0] < u_max)
+    v_bounds = np.logical_and(intersections[:, 1] > v_min, intersections[:, 1] < v_max)
     intersections = intersections[np.where(np.logical_and(u_bounds, v_bounds))]
     intersection_within_tol = []
     # return intersections
     for intersect in intersections:
         tol = TOL_DEG * np.pi / 180
+        interval_deg = INTERVAL_DEG * np.pi / 180
         i = int(intersect[2])
-        j = int(intersect[3])   
-        # print(intersect)
-        # print(i)    
-        # print(j)
-        # print(theta[i])
-        # print(theta[j])
-        # print(tol)    
-        # print(np.abs(theta[i] - theta[j]))
-        # print(np.abs(theta[i] - theta[j] - np.pi/2))
-        # print(np.abs(theta[i] - theta[j] - 3 * np.pi/2))
-        # print() 
-        
-        if np.abs(np.abs(theta[i] - theta[j]) - np.pi/2) < tol or np.abs(np.abs(theta[i] - theta[j]) - 3 * np.pi/2) < tol:
+        j = int(intersect[3])
+
+        if np.abs(np.abs(theta[i] - theta[j]) - np.pi/2 - interval_deg) < tol or \
+                np.abs(np.abs(theta[i] - theta[j]) - np.pi/2 + interval_deg) < tol or \
+                np.abs(np.abs(theta[i] - theta[j]) - 3 * np.pi/2 - interval_deg) < tol or \
+                np.abs(np.abs(theta[i] - theta[j]) - 3 * np.pi/2 + interval_deg) < tol:
             intersection_within_tol.append(True)
         else:
             intersection_within_tol.append(False)
 
-    # print(intersection_within_tol)
     valid_intersections = intersections[intersection_within_tol]
-    valid_intersections = valid_intersections[:,0:2]
+    valid_intersections = valid_intersections[:, 0:2]
     valid_intersections = np.vstack(valid_intersections)
-    # print(valid_intersections)
     valid_intersections = np.reshape(valid_intersections, (-1, 2))
-    # print(valid_intersections[:,0:2].astype(float))
-    return valid_intersections[:,0:2].astype(float)
+    return valid_intersections[:, 0:2].astype(float)
 
